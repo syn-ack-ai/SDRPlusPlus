@@ -136,7 +136,7 @@ namespace ImGui {
             float yPos = fftAreaMax.y - ((line - fftMin) * scaleFactor);
             window->DrawList->AddLine(ImVec2(fftAreaMin.x, roundf(yPos)),
                                       ImVec2(fftAreaMax.x, roundf(yPos)),
-                                      IM_COL32(50, 50, 50, 255), style::uiScale);
+                                      ImGui::ColorConvertFloat4ToU32(gui::themeManager.gridColor), style::uiScale);
             sprintf(buf, "%d", (int)line);
             ImVec2 txtSz = ImGui::CalcTextSize(buf);
             window->DrawList->AddText(ImVec2(fftAreaMin.x - txtSz.x - textVOffset, roundf(yPos - (txtSz.y / 2.0))), text, buf);
@@ -150,7 +150,7 @@ namespace ImGui {
             double xPos = fftAreaMin.x + ((freq - lowerFreq) * horizScale);
             window->DrawList->AddLine(ImVec2(roundf(xPos), fftAreaMin.y + 1),
                                       ImVec2(roundf(xPos), fftAreaMax.y),
-                                      IM_COL32(50, 50, 50, 255), style::uiScale);
+                                      ImGui::ColorConvertFloat4ToU32(gui::themeManager.gridColor), style::uiScale);
             window->DrawList->AddLine(ImVec2(roundf(xPos), fftAreaMax.y),
                                       ImVec2(roundf(xPos), fftAreaMax.y + scaleVOfsset),
                                       text, style::uiScale);
@@ -221,7 +221,7 @@ namespace ImGui {
             for (auto const& [name, vfo] : vfos) {
                 window->DrawList->AddRectFilled(vfo->wfRectMin, vfo->wfRectMax, vfo->color);
                 if (!vfo->lineVisible) { continue; }
-                window->DrawList->AddLine(vfo->wfLineMin, vfo->wfLineMax, (name == selectedVFO) ? IM_COL32(255, 0, 0, 255) : IM_COL32(255, 255, 0, 255), style::uiScale);
+                window->DrawList->AddLine(vfo->wfLineMin, vfo->wfLineMax, (name == selectedVFO) ? ImGui::ColorConvertFloat4ToU32(gui::themeManager.vfoLineSelected) : ImGui::ColorConvertFloat4ToU32(gui::themeManager.vfoLineUnselected), style::uiScale);
             }
         }
     }
@@ -834,8 +834,8 @@ namespace ImGui {
         //window->DrawList->AddRectFilled(widgetPos, widgetEndPos, IM_COL32( 0, 0, 0, 255 ));
         ImU32 bg = ImGui::ColorConvertFloat4ToU32(gui::themeManager.waterfallBg);
         window->DrawList->AddRectFilled(widgetPos, widgetEndPos, bg);
-        window->DrawList->AddRect(widgetPos, widgetEndPos, IM_COL32(50, 50, 50, 255), 0.0, 0, style::uiScale);
-        window->DrawList->AddLine(ImVec2(widgetPos.x, freqAreaMax.y), ImVec2(widgetPos.x + widgetSize.x, freqAreaMax.y), IM_COL32(50, 50, 50, 255), style::uiScale);
+        window->DrawList->AddRect(widgetPos, widgetEndPos, ImGui::ColorConvertFloat4ToU32(gui::themeManager.gridColor), 0.0, 0, style::uiScale);
+        window->DrawList->AddLine(ImVec2(widgetPos.x, freqAreaMax.y), ImVec2(widgetPos.x + widgetSize.x, freqAreaMax.y), ImGui::ColorConvertFloat4ToU32(gui::themeManager.gridColor), style::uiScale);
 
         if (!gui::mainWindow.lockWaterfallControls) {
             inputHandled = false;
@@ -1356,7 +1356,7 @@ namespace ImGui {
     void WaterfallVFO::draw(ImGuiWindow* window, bool selected) {
         window->DrawList->AddRectFilled(rectMin, rectMax, color);
         if (lineVisible) {
-            window->DrawList->AddLine(lineMin, lineMax, selected ? IM_COL32(255, 0, 0, 255) : IM_COL32(255, 255, 0, 255), style::uiScale);
+            window->DrawList->AddLine(lineMin, lineMax, selected ? ImGui::ColorConvertFloat4ToU32(gui::themeManager.vfoLineSelected) : ImGui::ColorConvertFloat4ToU32(gui::themeManager.vfoLineUnselected), style::uiScale);
         }
 
         if (notchVisible) {

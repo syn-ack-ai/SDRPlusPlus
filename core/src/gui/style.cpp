@@ -44,32 +44,26 @@ namespace style {
         hugeBuilder.AddRanges(hugeRange);
         hugeBuilder.BuildRanges(&hugeRanges);
         
+        // Select font - prefer JetBrains Mono for cyberpunk look, fall back to Roboto
+        std::string fontPath = resDir + "/fonts/JetBrainsMono-Medium.ttf";
+        if (!std::filesystem::is_regular_file(fontPath)) {
+            fontPath = resDir + "/fonts/Roboto-Medium.ttf";
+        }
+
         // Add bigger fonts for frequency select and title
-        baseFont = fonts->AddFontFromFileTTF(((std::string)(resDir + "/fonts/Roboto-Medium.ttf")).c_str(), 16.0f * uiScale, NULL, baseRanges.Data);
-        bigFont = fonts->AddFontFromFileTTF(((std::string)(resDir + "/fonts/Roboto-Medium.ttf")).c_str(), 45.0f * uiScale, NULL, bigRanges.Data);
-        hugeFont = fonts->AddFontFromFileTTF(((std::string)(resDir + "/fonts/Roboto-Medium.ttf")).c_str(), 128.0f * uiScale, NULL, hugeRanges.Data);
+        baseFont = fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f * uiScale, NULL, baseRanges.Data);
+        bigFont = fonts->AddFontFromFileTTF(fontPath.c_str(), 45.0f * uiScale, NULL, bigRanges.Data);
+        hugeFont = fonts->AddFontFromFileTTF(fontPath.c_str(), 128.0f * uiScale, NULL, hugeRanges.Data);
 
         return true;
     }
 
     void beginDisabled() {
-        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-        auto& style = ImGui::GetStyle();
-        ImVec4* colors = style.Colors;
-        ImVec4 btnCol = colors[ImGuiCol_Button];
-        ImVec4 frameCol = colors[ImGuiCol_FrameBg];
-        ImVec4 textCol = colors[ImGuiCol_Text];
-        btnCol.w = 0.15f;
-        frameCol.w = 0.30f;
-        textCol.w = 0.65f;
-        ImGui::PushStyleColor(ImGuiCol_Button, btnCol);
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, frameCol);
-        ImGui::PushStyleColor(ImGuiCol_Text, textCol);
+        ImGui::BeginDisabled(true);
     }
 
     void endDisabled() {
-        ImGui::PopItemFlag();
-        ImGui::PopStyleColor(3);
+        ImGui::EndDisabled();
     }
 }
 

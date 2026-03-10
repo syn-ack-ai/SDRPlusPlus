@@ -93,6 +93,9 @@
 // Read about ImGuiBackendFlags_RendererHasVtxOffset for details.
 #define ImDrawIdx unsigned int
 
+//---- Use Dear ImGui's own very basic math operators.
+#define IMGUI_DEFINE_MATH_OPERATORS
+
 //---- Override ImDrawCallback signature (will need to modify renderer backends accordingly)
 //struct ImDrawList;
 //struct ImDrawCmd;

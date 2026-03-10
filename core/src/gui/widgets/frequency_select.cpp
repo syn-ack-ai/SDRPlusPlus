@@ -141,14 +141,14 @@ void FrequencySelect::draw() {
         for (int i = 0; i < 12; i++) {
             onDigit = false;
             if (isInArea(mousePos, digitTopMins[i], digitTopMaxs[i])) {
-                window->DrawList->AddRectFilled(digitTopMins[i], digitTopMaxs[i], IM_COL32(255, 0, 0, 75));
+                window->DrawList->AddRectFilled(digitTopMins[i], digitTopMaxs[i], ImGui::ColorConvertFloat4ToU32(gui::themeManager.freqSelIncrement));
                 if (leftClick) {
                     incrementDigit(i);
                 }
                 onDigit = true;
             }
             if (isInArea(mousePos, digitBottomMins[i], digitBottomMaxs[i])) {
-                window->DrawList->AddRectFilled(digitBottomMins[i], digitBottomMaxs[i], IM_COL32(0, 0, 255, 75));
+                window->DrawList->AddRectFilled(digitBottomMins[i], digitBottomMaxs[i], ImGui::ColorConvertFloat4ToU32(gui::themeManager.freqSelDecrement));
                 if (leftClick) {
                     decrementDigit(i);
                 }
@@ -198,9 +198,9 @@ void FrequencySelect::draw() {
         digitHovered = hovered;
 
         if (isInArea(mousePos, digitTopMins[0], digitBottomMaxs[11])) {
-            bool shortcutKey = io.ConfigMacOSXBehaviors ? (io.KeyMods == ImGuiKeyModFlags_Super) : (io.KeyMods == ImGuiKeyModFlags_Ctrl);
-            bool ctrlOnly = (io.KeyMods == ImGuiKeyModFlags_Ctrl);
-            bool shiftOnly = (io.KeyMods == ImGuiKeyModFlags_Shift);
+            bool shortcutKey = io.ConfigMacOSXBehaviors ? (io.KeyMods == ImGuiMod_Super) : (io.KeyMods == ImGuiMod_Ctrl);
+            bool ctrlOnly = (io.KeyMods == ImGuiMod_Ctrl);
+            bool shiftOnly = (io.KeyMods == ImGuiMod_Shift);
             bool copy  = ((shortcutKey && ImGui::IsKeyPressed(ImGuiKey_C)) || (ctrlOnly  && ImGui::IsKeyPressed(ImGuiKey_Insert)));
             bool paste = ((shortcutKey && ImGui::IsKeyPressed(ImGuiKey_V)) || (shiftOnly && ImGui::IsKeyPressed(ImGuiKey_Insert)));
             if (copy) {

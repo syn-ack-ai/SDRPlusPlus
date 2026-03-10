@@ -89,11 +89,15 @@ bundle_find_full_path() {
 
     # Search other common paths
     if [ -f /usr/local/lib/$RPATH_NEXT ]; then
-        echo /usr/local/lib/$RPATH_NEXT 
+        echo /usr/local/lib/$RPATH_NEXT
+        return
+    fi
+    if [ -f /opt/homebrew/lib/$RPATH_NEXT ]; then
+        echo /opt/homebrew/lib/$RPATH_NEXT
         return
     fi
     if [ -f /Library/Frameworks/$RPATH_NEXT ]; then
-        echo /Library/Frameworks/$RPATH_NEXT 
+        echo /Library/Frameworks/$RPATH_NEXT
         return
     fi
 
@@ -227,5 +231,6 @@ bundle_sign() {
         return
     fi
 
+    xattr -cr $1
     codesign --force --deep -s - $1
 }

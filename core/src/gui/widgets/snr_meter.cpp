@@ -1,6 +1,7 @@
 #include <gui/widgets/volume_meter.h>
 #include <algorithm>
 #include <gui/style.h>
+#include <gui/gui.h>
 
 #ifndef IMGUI_DEFINE_MATH_OPERATORS
 #define IMGUI_DEFINE_MATH_OPERATORS
@@ -28,7 +29,7 @@ namespace ImGui {
         float it = size.x / 9;
         char buf[32];
 
-        window->DrawList->AddRectFilled(min + ImVec2(0, 1), min + ImVec2(roundf((float)val * ratio), 10 * style::uiScale), IM_COL32(0, 136, 255, 255));
+        window->DrawList->AddRectFilled(min + ImVec2(0, 1), min + ImVec2(roundf((float)val * ratio), 10 * style::uiScale), ImGui::ColorConvertFloat4ToU32(gui::themeManager.snrBarColor));
         window->DrawList->AddLine(min, min + ImVec2(0, (10.0f * style::uiScale) - 1), text, style::uiScale);
         window->DrawList->AddLine(min + ImVec2(0, (10.0f * style::uiScale) - 1), min + ImVec2(size.x + 1, (10.0f * style::uiScale) - 1), text, style::uiScale);
 

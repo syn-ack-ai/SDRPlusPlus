@@ -79,34 +79,45 @@ bool ThemeManager::loadTheme(std::string path) {
     }
 
     // Iterate through all parameters and check their contents
-    std::map<std::string, std::string> params = data;
-    for (auto const& [param, val] : params) {
+    for (auto& [param, val] : data.items()) {
         if (param == "name" || param == "author") { continue; }
 
-        // Exception for non-imgu colors
-        if (param == "WaterfallBackground" || param == "ClearColor" || param == "FFTHoldColor") {
-            if (val[0] != '#' || !std::all_of(val.begin() + 1, val.end(), ::isxdigit) || val.length() != 9) {
+        // Style float properties (rounding, padding, spacing)
+        if (STYLE_FLOAT_IDS.find(param) != STYLE_FLOAT_IDS.end()) {
+            if (!val.is_number()) {
+                flog::error("Theme {0} contains invalid {1} field. Expected number", path, param);
+                return false;
+            }
+            continue;
+        }
+
+        // Must be a string (color) from here on
+        if (!val.is_string()) {
+            flog::error("Theme {0} contains unknown {1} field.", path, param);
+            return false;
+        }
+        std::string sval = val.get<std::string>();
+
+        // Exception for non-imgui colors
+        if (CUSTOM_COL_IDS.find(param) != CUSTOM_COL_IDS.end()) {
+            if (sval[0] != '#' || !std::all_of(sval.begin() + 1, sval.end(), ::isxdigit) || sval.length() != 9) {
                 flog::error("Theme {0} contains invalid {1} field. Expected hex RGBA color", path, param);
                 return false;
             }
             continue;
         }
 
-        bool isValid = false;
-
         // If param is a color, check that it's a valid RGBA hex value
         if (IMGUI_COL_IDS.find(param) != IMGUI_COL_IDS.end()) {
-            if (val[0] != '#' || !std::all_of(val.begin() + 1, val.end(), ::isxdigit) || val.length() != 9) {
+            if (sval[0] != '#' || !std::all_of(sval.begin() + 1, sval.end(), ::isxdigit) || sval.length() != 9) {
                 flog::error("Theme {0} contains invalid {1} field. Expected hex RGBA color", path, param);
                 return false;
             }
-            isValid = true;
+            continue;
         }
 
-        if (!isValid) {
-            flog::error("Theme {0} contains unknown {1} field.", path, param);
-            return false;
-        }
+        flog::error("Theme {0} contains unknown {1} field.", path, param);
+        return false;
     }
 
     thm.data = data;
@@ -131,36 +142,37 @@ bool ThemeManager::applyTheme(std::string name) {
     style.GrabRounding = 0.0f;
     style.PopupRounding = 0.0f;
     style.ScrollbarRounding = 0.0f;
+    style.TabRounding = 0.0f;
 
     ImVec4* colors = style.Colors;
     Theme thm = themes[name];
 
     uint8_t ret[4];
-    std::map<std::string, std::string> params = thm.data;
-    for (auto const& [param, val] : params) {
+    for (auto& [param, val] : thm.data.items()) {
         if (param == "name" || param == "author") { continue; }
 
-        if (param == "WaterfallBackground") {
-            decodeRGBA(val, ret);
-            waterfallBg = ImVec4((float)ret[0] / 255.0f, (float)ret[1] / 255.0f, (float)ret[2] / 255.0f, (float)ret[3] / 255.0f);
+        // Apply style float properties
+        if (STYLE_FLOAT_IDS.find(param) != STYLE_FLOAT_IDS.end()) {
+            float* target = STYLE_FLOAT_IDS[param](&style);
+            *target = val.get<float>();
             continue;
         }
 
-        if (param == "ClearColor") {
-            decodeRGBA(val, ret);
-            clearColor = ImVec4((float)ret[0] / 255.0f, (float)ret[1] / 255.0f, (float)ret[2] / 255.0f, (float)ret[3] / 255.0f);
+        // From here, only string values (colors)
+        if (!val.is_string()) { continue; }
+        std::string sval = val.get<std::string>();
+
+        // Custom (non-ImGui) color properties
+        if (CUSTOM_COL_IDS.find(param) != CUSTOM_COL_IDS.end()) {
+            decodeRGBA(sval, ret);
+            ImVec4* target = CUSTOM_COL_IDS[param](this);
+            *target = ImVec4((float)ret[0] / 255.0f, (float)ret[1] / 255.0f, (float)ret[2] / 255.0f, (float)ret[3] / 255.0f);
             continue;
         }
 
-        if (param == "FFTHoldColor") {
-            decodeRGBA(val, ret);
-            fftHoldColor = ImVec4((float)ret[0] / 255.0f, (float)ret[1] / 255.0f, (float)ret[2] / 255.0f, (float)ret[3] / 255.0f);
-            continue;
-        }
-
-        // If param is a color, check that it's a valid RGBA hex value
+        // If param is a color, apply it
         if (IMGUI_COL_IDS.find(param) != IMGUI_COL_IDS.end()) {
-            decodeRGBA(val, ret);
+            decodeRGBA(sval, ret);
             colors[IMGUI_COL_IDS[param]] = ImVec4((float)ret[0] / 255.0f, (float)ret[1] / 255.0f, (float)ret[2] / 255.0f, (float)ret[3] / 255.0f);
             continue;
         }
@@ -185,6 +197,37 @@ std::vector<std::string> ThemeManager::getThemeNames() {
     for (auto [name, theme] : themes) { names.push_back(name); }
     return names;
 }
+
+std::map<std::string, ImVec4*(*)(ThemeManager*)> ThemeManager::CUSTOM_COL_IDS = {
+    { "WaterfallBackground", [](ThemeManager* t) -> ImVec4* { return &t->waterfallBg; } },
+    { "ClearColor",          [](ThemeManager* t) -> ImVec4* { return &t->clearColor; } },
+    { "FFTHoldColor",        [](ThemeManager* t) -> ImVec4* { return &t->fftHoldColor; } },
+    { "GridColor",           [](ThemeManager* t) -> ImVec4* { return &t->gridColor; } },
+    { "SNRBarColor",         [](ThemeManager* t) -> ImVec4* { return &t->snrBarColor; } },
+    { "VolMeterColor",       [](ThemeManager* t) -> ImVec4* { return &t->volMeterColor; } },
+    { "VolMeterClipColor",   [](ThemeManager* t) -> ImVec4* { return &t->volMeterClipColor; } },
+    { "VFOLineSelected",     [](ThemeManager* t) -> ImVec4* { return &t->vfoLineSelected; } },
+    { "VFOLineUnselected",   [](ThemeManager* t) -> ImVec4* { return &t->vfoLineUnselected; } },
+    { "FreqSelIncrement",    [](ThemeManager* t) -> ImVec4* { return &t->freqSelIncrement; } },
+    { "FreqSelDecrement",    [](ThemeManager* t) -> ImVec4* { return &t->freqSelDecrement; } },
+};
+
+std::map<std::string, float*(*)(ImGuiStyle*)> ThemeManager::STYLE_FLOAT_IDS = {
+    { "WindowRounding",    [](ImGuiStyle* s) -> float* { return &s->WindowRounding; } },
+    { "ChildRounding",     [](ImGuiStyle* s) -> float* { return &s->ChildRounding; } },
+    { "FrameRounding",     [](ImGuiStyle* s) -> float* { return &s->FrameRounding; } },
+    { "GrabRounding",      [](ImGuiStyle* s) -> float* { return &s->GrabRounding; } },
+    { "PopupRounding",     [](ImGuiStyle* s) -> float* { return &s->PopupRounding; } },
+    { "ScrollbarRounding", [](ImGuiStyle* s) -> float* { return &s->ScrollbarRounding; } },
+    { "TabRounding",       [](ImGuiStyle* s) -> float* { return &s->TabRounding; } },
+    { "WindowBorderSize",  [](ImGuiStyle* s) -> float* { return &s->WindowBorderSize; } },
+    { "ChildBorderSize",   [](ImGuiStyle* s) -> float* { return &s->ChildBorderSize; } },
+    { "FrameBorderSize",   [](ImGuiStyle* s) -> float* { return &s->FrameBorderSize; } },
+    { "PopupBorderSize",   [](ImGuiStyle* s) -> float* { return &s->PopupBorderSize; } },
+    { "ScrollbarSize",     [](ImGuiStyle* s) -> float* { return &s->ScrollbarSize; } },
+    { "GrabMinSize",       [](ImGuiStyle* s) -> float* { return &s->GrabMinSize; } },
+    { "SeparatorTextBorderSize", [](ImGuiStyle* s) -> float* { return &s->SeparatorTextBorderSize; } },
+};
 
 std::map<std::string, int> ThemeManager::IMGUI_COL_IDS = {
     { "Text", ImGuiCol_Text },

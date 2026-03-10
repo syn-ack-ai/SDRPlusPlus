@@ -254,7 +254,9 @@ void SinkManager::showVolumeSlider(std::string name, std::string prefix, float w
         float dummy = 0.0f;
         style::beginDisabled();
         ImGui::PushID(ImGui::GetID(("sdrpp_unmute_btn_" + name).c_str()));
-        ImGui::ImageButton(icons::MUTED, ImVec2(height, height), ImVec2(0, 0), ImVec2(1, 1), btnBorder, ImVec4(0, 0, 0, 0), ImGui::GetStyleColorVec4(ImGuiCol_Text));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(btnBorder, btnBorder));
+        ImGui::ImageButton("sdrpp_unmute_dis", icons::MUTED, ImVec2(height, height), ImVec2(0, 0), ImVec2(1, 1), ImVec4(0, 0, 0, 0), ImGui::GetStyleColorVec4(ImGuiCol_Text));
+        ImGui::PopStyleVar();
         ImGui::PopID();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(width - height - sliderOffset);
@@ -269,22 +271,26 @@ void SinkManager::showVolumeSlider(std::string name, std::string prefix, float w
 
     if (stream->volumeAjust.getMuted()) {
         ImGui::PushID(ImGui::GetID(("sdrpp_unmute_btn_" + name).c_str()));
-        if (ImGui::ImageButton(icons::MUTED, ImVec2(height, height), ImVec2(0, 0), ImVec2(1, 1), btnBorder, ImVec4(0, 0, 0, 0), ImGui::GetStyleColorVec4(ImGuiCol_Text))) {
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(btnBorder, btnBorder));
+        if (ImGui::ImageButton("sdrpp_unmute_btn", icons::MUTED, ImVec2(height, height), ImVec2(0, 0), ImVec2(1, 1), ImVec4(0, 0, 0, 0), ImGui::GetStyleColorVec4(ImGuiCol_Text))) {
             stream->volumeAjust.setMuted(false);
             core::configManager.acquire();
             saveStreamConfig(name);
             core::configManager.release(true);
         }
+        ImGui::PopStyleVar();
         ImGui::PopID();
     }
     else {
         ImGui::PushID(ImGui::GetID(("sdrpp_mute_btn_" + name).c_str()));
-        if (ImGui::ImageButton(icons::UNMUTED, ImVec2(height, height), ImVec2(0, 0), ImVec2(1, 1), btnBorder, ImVec4(0, 0, 0, 0), ImGui::GetStyleColorVec4(ImGuiCol_Text))) {
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(btnBorder, btnBorder));
+        if (ImGui::ImageButton("sdrpp_mute_btn", icons::UNMUTED, ImVec2(height, height), ImVec2(0, 0), ImVec2(1, 1), ImVec4(0, 0, 0, 0), ImGui::GetStyleColorVec4(ImGuiCol_Text))) {
             stream->volumeAjust.setMuted(true);
             core::configManager.acquire();
             saveStreamConfig(name);
             core::configManager.release(true);
         }
+        ImGui::PopStyleVar();
         ImGui::PopID();
     }
 
