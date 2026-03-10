@@ -6,16 +6,6 @@
 #include <signal_path/signal_path.h>
 #include <module.h>
 
-#include <dsp/pll.h>
-#include <dsp/stream.h>
-#include <dsp/demodulator.h>
-#include <dsp/window.h>
-#include <dsp/resampling.h>
-#include <dsp/processing.h>
-#include <dsp/routing.h>
-#include <dsp/sink.h>
-
-#include <gui/widgets/folder_select.h>
 #include <gui/widgets/constellation_diagram.h>
 
 #include <sat_decoder.h>
@@ -27,17 +17,9 @@ SDRPP_MOD_INFO{
     /* Name:            */ "weather_sat_decoder",
     /* Description:     */ "Weather Satellite Decoder for SDR++",
     /* Author:          */ "Ryzerth",
-    /* Version:         */ 0, 1, 0,
+    /* Version:         */ 0, 2, 0,
     /* Max instances    */ -1
 };
-
-std::string genFileName(std::string prefix, std::string suffix) {
-    time_t now = time(0);
-    tm* ltm = localtime(&now);
-    char buf[1024];
-    sprintf(buf, "%s_%02d-%02d-%02d_%02d-%02d-%02d%s", prefix.c_str(), ltm->tm_hour, ltm->tm_min, ltm->tm_sec, ltm->tm_mday, ltm->tm_mon + 1, ltm->tm_year + 1900, suffix.c_str());
-    return buf;
-}
 
 class WeatherSatDecoderModule : public ModuleManager::Instance {
 public:
@@ -48,7 +30,7 @@ public:
 
         decoders["NOAA HRPT"] = new NOAAHRPTDecoder(vfo, name);
 
-        // Generate the list
+        // Generate the decoder list for the combo box
         decoderNames.clear();
         decoderNamesStr = "";
         for (auto const& [name, dec] : decoders) {
@@ -64,6 +46,9 @@ public:
 
     ~WeatherSatDecoderModule() {
         decoder->stop();
+        gui::menu.removeEntry(name);
+        for (auto& [n, dec] : decoders) { delete dec; }
+        sigpath::vfoManager.deleteVFO(vfo);
     }
 
     void postInit() {}
@@ -77,9 +62,7 @@ public:
     }
 
     void disable() {
-        // Stop decoder
         decoder->stop();
-
         sigpath::vfoManager.deleteVFO(vfo);
         enabled = false;
     }
@@ -106,13 +89,11 @@ private:
         if (!_this->enabled) { style::beginDisabled(); }
 
         ImGui::SetNextItemWidth(menuWidth);
-        if (ImGui::Combo("##todo", &_this->decoderId, _this->decoderNamesStr.c_str())) {
+        if (ImGui::Combo(CONCAT("##weather_sat_dec_", _this->name), &_this->decoderId, _this->decoderNamesStr.c_str())) {
             _this->selectDecoder(_this->decoderNames[_this->decoderId]);
         }
 
         _this->decoder->drawMenu(menuWidth);
-
-        ImGui::Button("Record##testdsdfsds", ImVec2(menuWidth, 0));
 
         if (!_this->enabled) { style::endDisabled(); }
     }
@@ -143,5 +124,5 @@ MOD_EXPORT void _DELETE_INSTANCE_(void* instance) {
 }
 
 MOD_EXPORT void _END_() {
-    // Nothing either
+    // Nothing
 }

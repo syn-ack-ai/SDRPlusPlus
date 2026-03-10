@@ -1,220 +1,90 @@
 #pragma once
 #include <sat_decoder.h>
-#include <dsp/demodulator.h>
-#include <dsp/deframing.h>
-#include <dsp/noaa/hrpt.h>
-#include <dsp/noaa/tip.h>
-#include <dsp/sink.h>
-#include <gui/widgets/symbol_diagram.h>
+#include "hrpt_demod.h"
+#include "noaa_hrpt.h"
+#include <dsp/routing/splitter.h>
+#include <dsp/buffer/reshaper.h>
+#include <dsp/sink/handler_sink.h>
+#include <gui/widgets/constellation_diagram.h>
 #include <gui/widgets/line_push_image.h>
 #include <gui/gui.h>
 
-#define NOAA_HRPT_VFO_SR 3000000.0f
-#define NOAA_HRPT_VFO_BW 2000000.0f
-
 class NOAAHRPTDecoder : public SatDecoder {
 public:
-    NOAAHRPTDecoder(VFOManager::VFO* vfo, std::string name) : avhrrRGBImage(2048, 256), avhrr1Image(2048, 256), avhrr2Image(2048, 256), avhrr3Image(2048, 256), avhrr4Image(2048, 256), avhrr5Image(2048, 256), symDiag(0.5f) {
+    NOAAHRPTDecoder(VFOManager::VFO* vfo, std::string name)
+        : avhrrRGBImage(noaa::HRPT_AVHRR_PIXELS, 256),
+          avhrr1Image(noaa::HRPT_AVHRR_PIXELS, 256),
+          avhrr2Image(noaa::HRPT_AVHRR_PIXELS, 256),
+          avhrr3Image(noaa::HRPT_AVHRR_PIXELS, 256),
+          avhrr4Image(noaa::HRPT_AVHRR_PIXELS, 256),
+          avhrr5Image(noaa::HRPT_AVHRR_PIXELS, 256) {
         _vfo = vfo;
         _name = name;
 
-        // Core DSP
-        demod.init(vfo->output, NOAA_HRPT_VFO_SR, 665400.0f * 2.0f, 0.02e-3, (0.06f * 0.06f) / 2.0f, 32, 0.6f, (0.01f * 0.01f) / 4.0f, 0.01f, 0.005);
+        // Allocate frame buffers
+        manchFrame = new uint8_t[noaa::HRPT_MANCH_FRAME_BITS];
+        decodedFrame = new uint8_t[noaa::HRPT_FRAME_BITS];
 
-        split.init(demod.out);
-        split.bindStream(&dataStream);
+        // Generate Manchester-encoded sync word for correlation
+        noaa::getManchesterSyncBits(manchSyncWord);
+
+        // DSP chain: demod -> splitter -> [vis constellation + data handler]
+        demod.init(vfo->output, noaa::HRPT_SYMBOL_RATE, noaa::HRPT_VFO_SR,
+                   33, 0.6, 0.1, 0.005, 1e-6, 0.01);
+
+        split.init(&demod.out);
         split.bindStream(&visStream);
+        split.bindStream(&dataStream);
 
-        reshape.init(&visStream, 1024, (NOAA_HRPT_VFO_SR / 30) - 1024);
+        reshape.init(&visStream, 1024, (noaa::HRPT_SYMBOL_RATE / 30) - 1024);
         visSink.init(&reshape.out, visHandler, this);
-
-        deframe.init(&dataStream, 11090 * 10 * 2, (uint8_t*)dsp::noaa::HRPTSyncWord, 60);
-        manDec.init(&deframe.out, false);
-        packer.init(&manDec.out);
-        demux.init(&packer.out);
-        tipDemux.init(&demux.TIPOut);
-        hirsDemux.init(&tipDemux.HIRSOut);
-
-        // All Sinks
-        avhrr1Sink.init(&demux.AVHRRChan1Out, avhrr1Handler, this);
-        avhrr2Sink.init(&demux.AVHRRChan2Out, avhrr2Handler, this);
-        avhrr3Sink.init(&demux.AVHRRChan3Out, avhrr3Handler, this);
-        avhrr4Sink.init(&demux.AVHRRChan4Out, avhrr4Handler, this);
-        avhrr5Sink.init(&demux.AVHRRChan5Out, avhrr5Handler, this);
-
-        sbuvSink.init(&tipDemux.SBUVOut);
-        dcsSink.init(&tipDemux.DCSOut);
-        semSink.init(&tipDemux.SEMOut);
-
-        aipSink.init(&demux.AIPOut);
-
-        hirs1Sink.init(&hirsDemux.radChannels[0], hirs1Handler, this);
-        hirs2Sink.init(&hirsDemux.radChannels[1], hirs2Handler, this);
-        hirs3Sink.init(&hirsDemux.radChannels[2], hirs3Handler, this);
-        hirs4Sink.init(&hirsDemux.radChannels[3], hirs4Handler, this);
-        hirs5Sink.init(&hirsDemux.radChannels[4], hirs5Handler, this);
-        hirs6Sink.init(&hirsDemux.radChannels[5], hirs6Handler, this);
-        hirs7Sink.init(&hirsDemux.radChannels[6], hirs7Handler, this);
-        hirs8Sink.init(&hirsDemux.radChannels[7], hirs8Handler, this);
-        hirs9Sink.init(&hirsDemux.radChannels[8], hirs9Handler, this);
-        hirs10Sink.init(&hirsDemux.radChannels[9], hirs10Handler, this);
-        hirs11Sink.init(&hirsDemux.radChannels[10], hirs11Handler, this);
-        hirs12Sink.init(&hirsDemux.radChannels[11], hirs12Handler, this);
-        hirs13Sink.init(&hirsDemux.radChannels[12], hirs13Handler, this);
-        hirs14Sink.init(&hirsDemux.radChannels[13], hirs14Handler, this);
-        hirs15Sink.init(&hirsDemux.radChannels[14], hirs15Handler, this);
-        hirs16Sink.init(&hirsDemux.radChannels[15], hirs16Handler, this);
-        hirs17Sink.init(&hirsDemux.radChannels[16], hirs17Handler, this);
-        hirs18Sink.init(&hirsDemux.radChannels[17], hirs18Handler, this);
-        hirs19Sink.init(&hirsDemux.radChannels[18], hirs19Handler, this);
-        hirs20Sink.init(&hirsDemux.radChannels[19], hirs20Handler, this);
+        dataSink.init(&dataStream, dataHandler, this);
     }
 
-    void select() {
-        _vfo->setSampleRate(NOAA_HRPT_VFO_SR, NOAA_HRPT_VFO_BW);
+    ~NOAAHRPTDecoder() {
+        delete[] manchFrame;
+        delete[] decodedFrame;
+    }
+
+    void select() override {
+        _vfo->setSampleRate(noaa::HRPT_VFO_SR, noaa::HRPT_VFO_BW);
         _vfo->setReference(ImGui::WaterfallVFO::REF_CENTER);
-        _vfo->setBandwidthLimits(NOAA_HRPT_VFO_BW, NOAA_HRPT_VFO_BW, true);
-    };
+        _vfo->setBandwidthLimits(noaa::HRPT_VFO_BW, noaa::HRPT_VFO_BW, true);
+    }
 
-    void start() {
+    void start() override {
+        synced = false;
+        manchFramePos = 0;
+        syncWindowLen = 0;
+
         demod.start();
-
         split.start();
         reshape.start();
         visSink.start();
+        dataSink.start();
+    }
 
-        deframe.start();
-        manDec.start();
-        packer.start();
-        demux.start();
-        tipDemux.start();
-        hirsDemux.start();
-
-        avhrr1Sink.start();
-        avhrr2Sink.start();
-        avhrr3Sink.start();
-        avhrr4Sink.start();
-        avhrr5Sink.start();
-
-        sbuvSink.start();
-        dcsSink.start();
-        semSink.start();
-
-        aipSink.start();
-
-        hirs1Sink.start();
-        hirs2Sink.start();
-        hirs3Sink.start();
-        hirs4Sink.start();
-        hirs5Sink.start();
-        hirs6Sink.start();
-        hirs7Sink.start();
-        hirs8Sink.start();
-        hirs9Sink.start();
-        hirs10Sink.start();
-        hirs11Sink.start();
-        hirs12Sink.start();
-        hirs13Sink.start();
-        hirs14Sink.start();
-        hirs15Sink.start();
-        hirs16Sink.start();
-        hirs17Sink.start();
-        hirs18Sink.start();
-        hirs19Sink.start();
-        hirs20Sink.start();
-
-        compositeThread = std::thread(&NOAAHRPTDecoder::avhrrCompositeWorker, this);
-    };
-
-    void stop() {
-        compositeIn1.stopReader();
-        compositeIn1.stopWriter();
-        compositeIn2.stopReader();
-        compositeIn2.stopWriter();
-
+    void stop() override {
         demod.stop();
-
         split.stop();
         reshape.stop();
         visSink.stop();
-
-        deframe.stop();
-        manDec.stop();
-        packer.stop();
-        demux.stop();
-        tipDemux.stop();
-        hirsDemux.stop();
-
-        avhrr1Sink.stop();
-        avhrr2Sink.stop();
-        avhrr3Sink.stop();
-        avhrr4Sink.stop();
-        avhrr5Sink.stop();
-
-        sbuvSink.stop();
-        dcsSink.stop();
-        semSink.stop();
-
-        aipSink.stop();
-
-        hirs1Sink.stop();
-        hirs2Sink.stop();
-        hirs3Sink.stop();
-        hirs4Sink.stop();
-        hirs5Sink.stop();
-        hirs6Sink.stop();
-        hirs7Sink.stop();
-        hirs8Sink.stop();
-        hirs9Sink.stop();
-        hirs10Sink.stop();
-        hirs11Sink.stop();
-        hirs12Sink.stop();
-        hirs13Sink.stop();
-        hirs14Sink.stop();
-        hirs15Sink.stop();
-        hirs16Sink.stop();
-        hirs17Sink.stop();
-        hirs18Sink.stop();
-        hirs19Sink.stop();
-        hirs20Sink.stop();
-
-        if (compositeThread.joinable()) {
-            compositeThread.join();
-        }
-
-        compositeIn1.clearReadStop();
-        compositeIn1.clearWriteStop();
-        compositeIn2.clearReadStop();
-        compositeIn2.clearWriteStop();
-    };
-
-    void setVFO(VFOManager::VFO* vfo) {
-        _vfo = vfo;
-        demod.setInput(_vfo->output);
-    };
-
-    virtual bool canRecord() {
-        return false;
+        dataSink.stop();
     }
 
-    // bool startRecording(std::string recPath) {
+    void setVFO(VFOManager::VFO* vfo) override {
+        _vfo = vfo;
+        demod.setInput(_vfo->output);
+    }
 
-    // };
+    bool canRecord() override { return false; }
 
-    // void stopRecording() {
-
-    // };
-
-    // bool isRecording() {
-
-    // };
-
-    void drawMenu(float menuWidth) {
+    void drawMenu(float menuWidth) override {
         ImGui::SetNextItemWidth(menuWidth);
-        symDiag.draw();
+        constDiag.draw();
 
+        gui::mainWindow.lockWaterfallControls = showWindow;
         if (showWindow) {
-            gui::mainWindow.lockWaterfallControls = true;
             ImGui::Begin("NOAA HRPT Decoder");
             ImGui::BeginTabBar("NOAAHRPTTabs");
 
@@ -227,325 +97,163 @@ public:
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("AVHRR 1")) {
-                ImGui::BeginChild("AVHRR1Child");
-                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-                avhrr1Image.draw();
-                ImGui::SetScrollHereY(1.0f);
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("AVHRR 2")) {
-                ImGui::BeginChild("AVHRR2Child");
-                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-                avhrr2Image.draw();
-                ImGui::SetScrollHereY(1.0f);
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("AVHRR 3")) {
-                ImGui::BeginChild("AVHRR3Child");
-                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-                avhrr3Image.draw();
-                ImGui::SetScrollHereY(1.0f);
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("AVHRR 4")) {
-                ImGui::BeginChild("AVHRR4Child");
-                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-                avhrr4Image.draw();
-                ImGui::SetScrollHereY(1.0f);
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("AVHRR 5")) {
-                ImGui::BeginChild("AVHRR5Child");
-                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-                avhrr5Image.draw();
-                ImGui::SetScrollHereY(1.0f);
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("HIRS")) {
-                ImGui::BeginChild("HIRSChild");
-
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
+            drawChannelTab("AVHRR 1", "AVHRR1Child", avhrr1Image);
+            drawChannelTab("AVHRR 2", "AVHRR2Child", avhrr2Image);
+            drawChannelTab("AVHRR 3", "AVHRR3Child", avhrr3Image);
+            drawChannelTab("AVHRR 4", "AVHRR4Child", avhrr4Image);
+            drawChannelTab("AVHRR 5", "AVHRR5Child", avhrr5Image);
 
             ImGui::EndTabBar();
             ImGui::End();
         }
 
         ImGui::Checkbox("Show Image", &showWindow);
-    };
+    }
 
 private:
-    // AVHRR Data Handlers
-    void avhrrCompositeWorker() {
-        compositeIn1.flush();
-        compositeIn2.flush();
-        while (true) {
-            if (compositeIn1.read() < 0) { return; }
-            if (compositeIn2.read() < 0) { return; }
+    static void drawChannelTab(const char* label, const char* childId, ImGui::LinePushImage& img) {
+        if (ImGui::BeginTabItem(label)) {
+            ImGui::BeginChild(childId);
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            img.draw();
+            ImGui::SetScrollHereY(1.0f);
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+    }
 
-            uint8_t* buf = avhrrRGBImage.acquireNextLine();
-            float rg, b;
-            for (int i = 0; i < 2048; i++) {
-                b = ((float)compositeIn1.readBuf[i] * 255.0f) / 1024.0f;
-                rg = ((float)compositeIn2.readBuf[i] * 255.0f) / 1024.0f;
-                buf[(i * 4)] = rg;
-                buf[(i * 4) + 1] = rg;
-                buf[(i * 4) + 2] = b;
-                buf[(i * 4) + 3] = 255;
+    static void visHandler(dsp::complex_t* data, int count, void* ctx) {
+        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
+        dsp::complex_t* buf = _this->constDiag.acquireBuffer();
+        memcpy(buf, data, 1024 * sizeof(dsp::complex_t));
+        _this->constDiag.releaseBuffer();
+    }
+
+    static void dataHandler(dsp::complex_t* data, int count, void* ctx) {
+        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
+        // BPSK: symbol information is in the real part
+        for (int i = 0; i < count; i++) {
+            uint8_t bit = data[i].re > 0.0f ? 1 : 0;
+            _this->processBit(bit);
+        }
+    }
+
+    void processBit(uint8_t bit) {
+        if (synced) {
+            // Collecting Manchester frame bits
+            manchFrame[manchFramePos++] = bit;
+            if (manchFramePos >= noaa::HRPT_MANCH_FRAME_BITS) {
+                // Complete frame received, decode and process
+                int decodedLen = noaa::manchesterDecode(manchFrame, decodedFrame, noaa::HRPT_MANCH_FRAME_BITS);
+                if (decodedLen >= noaa::HRPT_FRAME_BITS) {
+                    processFrame();
+                }
+                manchFramePos = 0;
+                framesReceived++;
+
+                // Periodically re-verify sync
+                if (framesReceived > 100) {
+                    synced = false;
+                    framesReceived = 0;
+                    syncWindowLen = 0;
+                }
             }
-            avhrrRGBImage.releaseNextLine();
+        }
+        else {
+            // Searching for sync: fill correlation window
+            if (syncWindowLen < noaa::HRPT_MANCH_SYNC_BITS) {
+                syncWindow[syncWindowLen++] = bit;
+            }
+            else {
+                // Shift window and add new bit
+                memmove(syncWindow, syncWindow + 1, noaa::HRPT_MANCH_SYNC_BITS - 1);
+                syncWindow[noaa::HRPT_MANCH_SYNC_BITS - 1] = bit;
 
-            compositeIn1.flush();
-            compositeIn2.flush();
+                // Correlate against Manchester sync word
+                int corr = noaa::correlateSync(syncWindow, manchSyncWord);
+                if (corr >= noaa::HRPT_MANCH_SYNC_BITS - 12) {
+                    // Sync found! Copy sync bits as start of frame
+                    synced = true;
+                    framesReceived = 0;
+                    memcpy(manchFrame, syncWindow, noaa::HRPT_MANCH_SYNC_BITS);
+                    manchFramePos = noaa::HRPT_MANCH_SYNC_BITS;
+                    syncWindowLen = 0;
+                }
+            }
         }
     }
 
-    static void avhrr1Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-        uint8_t* buf = _this->avhrr1Image.acquireNextLine();
-        float val;
-        for (int i = 0; i < 2048; i++) {
-            val = ((float)data[i] * 255.0f) / 1024.0f;
-            buf[(i * 4)] = val;
-            buf[(i * 4) + 1] = val;
-            buf[(i * 4) + 2] = val;
+    void processFrame() {
+        // Extract AVHRR channels from decoded frame
+        uint16_t channels[noaa::HRPT_AVHRR_CHANNELS][noaa::HRPT_AVHRR_PIXELS];
+        noaa::extractAVHRR(decodedFrame, channels);
+
+        // Update greyscale images for each channel
+        updateChannelImage(avhrr1Image, channels[0]);
+        updateChannelImage(avhrr2Image, channels[1]);
+        updateChannelImage(avhrr3Image, channels[2]);
+        updateChannelImage(avhrr4Image, channels[3]);
+        updateChannelImage(avhrr5Image, channels[4]);
+
+        // RGB composite: channels 2,2,1 mapped to R,G,B (same as old code)
+        uint8_t* buf = avhrrRGBImage.acquireNextLine();
+        for (int i = 0; i < noaa::HRPT_AVHRR_PIXELS; i++) {
+            float ch1 = ((float)channels[0][i] * 255.0f) / 1024.0f;
+            float ch2 = ((float)channels[1][i] * 255.0f) / 1024.0f;
+            buf[(i * 4)]     = (uint8_t)std::clamp(ch2, 0.0f, 255.0f); // R
+            buf[(i * 4) + 1] = (uint8_t)std::clamp(ch2, 0.0f, 255.0f); // G
+            buf[(i * 4) + 2] = (uint8_t)std::clamp(ch1, 0.0f, 255.0f); // B
+            buf[(i * 4) + 3] = 255;                                      // A
+        }
+        avhrrRGBImage.releaseNextLine();
+    }
+
+    void updateChannelImage(ImGui::LinePushImage& img, const uint16_t* data) {
+        uint8_t* buf = img.acquireNextLine();
+        for (int i = 0; i < noaa::HRPT_AVHRR_PIXELS; i++) {
+            float val = ((float)data[i] * 255.0f) / 1024.0f;
+            uint8_t v = (uint8_t)std::clamp(val, 0.0f, 255.0f);
+            buf[(i * 4)]     = v;
+            buf[(i * 4) + 1] = v;
+            buf[(i * 4) + 2] = v;
             buf[(i * 4) + 3] = 255;
         }
-        _this->avhrr1Image.releaseNextLine();
-
-        memcpy(_this->compositeIn1.writeBuf, data, count * sizeof(uint16_t));
-        _this->compositeIn1.swap(count);
-    }
-
-    static void avhrr2Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-        uint8_t* buf = _this->avhrr2Image.acquireNextLine();
-        float val;
-        for (int i = 0; i < 2048; i++) {
-            val = ((float)data[i] * 255.0f) / 1024.0f;
-            buf[(i * 4)] = val;
-            buf[(i * 4) + 1] = val;
-            buf[(i * 4) + 2] = val;
-            buf[(i * 4) + 3] = 255;
-        }
-        _this->avhrr2Image.releaseNextLine();
-
-        memcpy(_this->compositeIn2.writeBuf, data, count * sizeof(uint16_t));
-        _this->compositeIn2.swap(count);
-    }
-
-    static void avhrr3Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-        uint8_t* buf = _this->avhrr3Image.acquireNextLine();
-        float val;
-        for (int i = 0; i < 2048; i++) {
-            val = ((float)data[i] * 255.0f) / 1024.0f;
-            buf[(i * 4)] = val;
-            buf[(i * 4) + 1] = val;
-            buf[(i * 4) + 2] = val;
-            buf[(i * 4) + 3] = 255;
-        }
-        _this->avhrr3Image.releaseNextLine();
-    }
-
-    static void avhrr4Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-        uint8_t* buf = _this->avhrr4Image.acquireNextLine();
-        float val;
-        for (int i = 0; i < 2048; i++) {
-            val = ((float)data[i] * 255.0f) / 1024.0f;
-            buf[(i * 4)] = val;
-            buf[(i * 4) + 1] = val;
-            buf[(i * 4) + 2] = val;
-            buf[(i * 4) + 3] = 255;
-        }
-        _this->avhrr4Image.releaseNextLine();
-    }
-
-    static void avhrr5Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-        uint8_t* buf = _this->avhrr5Image.acquireNextLine();
-        float val;
-        for (int i = 0; i < 2048; i++) {
-            val = ((float)data[i] * 255.0f) / 1024.0f;
-            buf[(i * 4)] = val;
-            buf[(i * 4) + 1] = val;
-            buf[(i * 4) + 2] = val;
-            buf[(i * 4) + 3] = 255;
-        }
-        _this->avhrr5Image.releaseNextLine();
-    }
-
-    // HIRS Data Handlers
-    static void hirs1Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs2Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs3Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs4Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs5Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs6Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs7Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs8Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs9Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs10Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs11Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs12Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs13Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs14Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs15Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs16Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs17Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs18Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs19Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void hirs20Handler(uint16_t* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-    }
-
-    static void visHandler(float* data, int count, void* ctx) {
-        NOAAHRPTDecoder* _this = (NOAAHRPTDecoder*)ctx;
-        memcpy(_this->symDiag.acquireBuffer(), data, 1024 * sizeof(float));
-        _this->symDiag.releaseBuffer();
+        img.releaseNextLine();
     }
 
     std::string _name;
-    std::string _recPath;
     VFOManager::VFO* _vfo;
 
-    // DSP
-    dsp::PMDemod demod;
+    // Sync word (Manchester encoded, 120 bits)
+    uint8_t manchSyncWord[noaa::HRPT_MANCH_SYNC_BITS];
 
-    dsp::stream<float> visStream;
-    dsp::stream<float> dataStream;
-    dsp::Splitter<float> split;
+    // Sync detection window
+    uint8_t syncWindow[noaa::HRPT_MANCH_SYNC_BITS];
+    int syncWindowLen = 0;
 
-    dsp::Reshaper<float> reshape;
+    // Frame accumulation
+    uint8_t* manchFrame;    // Manchester-encoded frame bits (221800)
+    uint8_t* decodedFrame;  // Decoded frame bits (110900)
+    int manchFramePos = 0;
+    bool synced = false;
+    int framesReceived = 0;
 
-    dsp::ManchesterDeframer deframe;
-    dsp::ManchesterDecoder manDec;
-    dsp::BitPacker packer;
-    dsp::noaa::HRPTDemux demux;
-    dsp::noaa::TIPDemux tipDemux;
-    dsp::noaa::HIRSDemux hirsDemux;
+    // DSP chain
+    dsp::demod::HRPT demod;
+    dsp::routing::Splitter<dsp::complex_t> split;
+    dsp::stream<dsp::complex_t> visStream;
+    dsp::stream<dsp::complex_t> dataStream;
+    dsp::buffer::Reshaper<dsp::complex_t> reshape;
+    dsp::sink::Handler<dsp::complex_t> visSink;
+    dsp::sink::Handler<dsp::complex_t> dataSink;
 
-    // AHVRR Handlers
-    dsp::HandlerSink<uint16_t> avhrr1Sink;
-    dsp::HandlerSink<uint16_t> avhrr2Sink;
-    dsp::HandlerSink<uint16_t> avhrr3Sink;
-    dsp::HandlerSink<uint16_t> avhrr4Sink;
-    dsp::HandlerSink<uint16_t> avhrr5Sink;
-
-    // (at the moment) Unused TIP handlers
-    dsp::NullSink<uint8_t> sbuvSink;
-    dsp::NullSink<uint8_t> dcsSink;
-    dsp::NullSink<uint8_t> semSink;
-
-    // (at the moment) Unused AIP handlers
-    dsp::NullSink<uint8_t> aipSink;
-
-    // HIRS Handlers
-    dsp::HandlerSink<uint16_t> hirs1Sink;
-    dsp::HandlerSink<uint16_t> hirs2Sink;
-    dsp::HandlerSink<uint16_t> hirs3Sink;
-    dsp::HandlerSink<uint16_t> hirs4Sink;
-    dsp::HandlerSink<uint16_t> hirs5Sink;
-    dsp::HandlerSink<uint16_t> hirs6Sink;
-    dsp::HandlerSink<uint16_t> hirs7Sink;
-    dsp::HandlerSink<uint16_t> hirs8Sink;
-    dsp::HandlerSink<uint16_t> hirs9Sink;
-    dsp::HandlerSink<uint16_t> hirs10Sink;
-    dsp::HandlerSink<uint16_t> hirs11Sink;
-    dsp::HandlerSink<uint16_t> hirs12Sink;
-    dsp::HandlerSink<uint16_t> hirs13Sink;
-    dsp::HandlerSink<uint16_t> hirs14Sink;
-    dsp::HandlerSink<uint16_t> hirs15Sink;
-    dsp::HandlerSink<uint16_t> hirs16Sink;
-    dsp::HandlerSink<uint16_t> hirs17Sink;
-    dsp::HandlerSink<uint16_t> hirs18Sink;
-    dsp::HandlerSink<uint16_t> hirs19Sink;
-    dsp::HandlerSink<uint16_t> hirs20Sink;
-
-    dsp::HandlerSink<float> visSink;
-
+    // GUI
+    ImGui::ConstellationDiagram constDiag;
     ImGui::LinePushImage avhrrRGBImage;
     ImGui::LinePushImage avhrr1Image;
     ImGui::LinePushImage avhrr2Image;
     ImGui::LinePushImage avhrr3Image;
     ImGui::LinePushImage avhrr4Image;
     ImGui::LinePushImage avhrr5Image;
-
-    ImGui::SymbolDiagram symDiag;
-
-    dsp::stream<uint16_t> compositeIn1;
-    dsp::stream<uint16_t> compositeIn2;
-    std::thread compositeThread;
-
     bool showWindow = false;
 };

@@ -189,7 +189,7 @@ bundle_install_binary() {
     # Remove all its rpaths
     if [ "$RPATHS" != "" ]; then
         echo "$RPATHS" | while read -r RPATH; do
-            install_name_tool -delete_rpath $RPATH $EXEC_DEST
+            install_name_tool -delete_rpath $RPATH $EXEC_DEST 2>/dev/null || true
         done
     fi
     

@@ -8,7 +8,7 @@ NUM_CORES=$(sysctl -n hw.ncpu)
 
 # CMake options for modules that need extra dependencies
 # Enable modules for which you have the libraries installed
-CMAKE_EXTRA_OPTS=""
+CMAKE_EXTRA_OPTS="-DOPT_BUILD_WEATHER_SAT_DECODER=ON -DOPT_BUILD_SDRPLAY_SOURCE=ON"
 
 # Detect available Homebrew libraries and enable matching modules
 if [ -d "/opt/homebrew/lib" ] || [ -d "/usr/local/lib" ]; then
@@ -104,6 +104,7 @@ bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/source_modules
 bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/source_modules/rtl_tcp_source/rtl_tcp_source.dylib
 bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/source_modules/sdrpp_server_source/sdrpp_server_source.dylib
 bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/source_modules/spectran_http_source/spectran_http_source.dylib
+bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/source_modules/sdrplay_source/sdrplay_source.dylib
 bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/source_modules/spyserver_source/spyserver_source.dylib
 
 # Sink modules
@@ -117,6 +118,7 @@ bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/decoder_module
 bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/decoder_modules/meteor_demodulator/meteor_demodulator.dylib
 bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/decoder_modules/pager_decoder/pager_decoder.dylib
 bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/decoder_modules/radio/radio.dylib
+bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/decoder_modules/weather_sat_decoder/weather_sat_decoder.dylib
 
 # Misc modules
 bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/misc_modules/discord_integration/discord_integration.dylib
@@ -142,7 +144,9 @@ echo "[5/5] Signing app bundle..."
 
 # Remove extended attributes (FinderInfo, provenance, etc.) that block codesign
 xattr -cr "$BUNDLE" 2>/dev/null || true
-find "$BUNDLE" -exec xattr -c {} \; 2>/dev/null || true
+# Remove all extended attributes from every file individually (xattr -cr can miss some)
+find "$BUNDLE" -type f -exec xattr -c {} + 2>/dev/null || true
+find "$BUNDLE" -type d -exec xattr -c {} + 2>/dev/null || true
 
 # Sign
 codesign --force --deep --sign - "$BUNDLE"
