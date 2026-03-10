@@ -66,9 +66,24 @@ bundle_get_exec_rpaths() {
 
 # bundle_find_full_path [dep_path] [exec_rpaths]
 bundle_find_full_path() {
-    # If path is relative to rpath, find the full path
+    # If path is not relative to rpath, return it (or try common paths if it doesn't exist)
     local IS_RPATH_RELATIVE=$(echo $1 | grep @rpath/)
     if [ "$IS_RPATH_RELATIVE" = "" ]; then
+        if [ -f "$1" ]; then
+            echo $1
+            return
+        fi
+        # Absolute path doesn't exist, try common library locations by name
+        local ABS_NAME=$(basename $1)
+        if [ -f /usr/local/lib/$ABS_NAME ]; then
+            echo /usr/local/lib/$ABS_NAME
+            return
+        fi
+        if [ -f /opt/homebrew/lib/$ABS_NAME ]; then
+            echo /opt/homebrew/lib/$ABS_NAME
+            return
+        fi
+        # Return original even though it doesn't exist (caller will handle)
         echo $1
         return
     fi

@@ -128,22 +128,8 @@ bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/misc_modules/r
 bundle_install_binary $BUNDLE $BUNDLE/Contents/Plugins $BUILD_DIR/misc_modules/scanner/scanner.dylib
 echo ""
 
-# ========================= Step 4: Fix missing libraries =========================
-echo "[4/5] Fixing library dependencies..."
-
-# Install libvolk if it exists but wasn't bundled (common issue)
-if [ ! -f "$BUNDLE/Contents/Frameworks/libvolk.3.3.dylib" ]; then
-    VOLK_PATH=""
-    if [ -f "/opt/homebrew/lib/libvolk.3.3.dylib" ]; then
-        VOLK_PATH="/opt/homebrew/lib/libvolk.3.3.dylib"
-    elif [ -f "/usr/local/lib/libvolk.3.3.dylib" ]; then
-        VOLK_PATH="/usr/local/lib/libvolk.3.3.dylib"
-    fi
-    if [ -n "$VOLK_PATH" ]; then
-        echo "Installing libvolk from $VOLK_PATH"
-        cp "$VOLK_PATH" "$BUNDLE/Contents/Frameworks/"
-    fi
-fi
+# ========================= Step 4: Fix permissions =========================
+echo "[4/5] Fixing library permissions..."
 
 # Fix permissions on all framework dylibs (Homebrew copies may be read-only)
 chmod 755 "$BUNDLE/Contents/Frameworks/"*.dylib 2>/dev/null || true
@@ -156,8 +142,7 @@ echo "[5/5] Signing app bundle..."
 
 # Remove extended attributes (FinderInfo, provenance, etc.) that block codesign
 xattr -cr "$BUNDLE" 2>/dev/null || true
-# Remove FinderInfo specifically (survives xattr -cr sometimes)
-xattr -d com.apple.FinderInfo "$BUNDLE" 2>/dev/null || true
+find "$BUNDLE" -exec xattr -c {} \; 2>/dev/null || true
 
 # Sign
 codesign --force --deep --sign - "$BUNDLE"
