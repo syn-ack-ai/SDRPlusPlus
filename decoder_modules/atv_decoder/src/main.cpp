@@ -60,13 +60,14 @@ class ATVDecoderModule : public ModuleManager::Instance {
     }
 
     ~ATVDecoderModule() {
+        // Stop sink first to prevent handler callbacks during teardown
+        sink.stop();
+        sync.stop();
+        demod.stop();
+        agc.stop();
         if (vfo) {
             sigpath::vfoManager.deleteVFO(vfo);
         }
-        agc.stop();
-        demod.stop();
-        sync.stop();
-        sink.stop();
         gui::menu.removeEntry(name);
     }
 

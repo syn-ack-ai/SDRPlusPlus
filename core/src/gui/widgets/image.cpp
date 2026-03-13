@@ -13,6 +13,7 @@ namespace ImGui {
     }
 
     ImageDisplay::~ImageDisplay() {
+        glDeleteTextures(1, &textureId);
         free(buffer);
         free(activeBuffer);
     }

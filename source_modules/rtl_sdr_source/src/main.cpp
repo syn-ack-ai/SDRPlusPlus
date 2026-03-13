@@ -249,8 +249,10 @@ public:
             gainId = config.conf["devices"][selectedDevName]["gain"];
         }
 
-        if (gainId >= gainList.size()) { gainId = gainList.size() - 1; }
-        updateGainTxt();
+        if (!gainList.empty()) {
+            if (gainId >= (int)gainList.size()) { gainId = gainList.size() - 1; }
+            updateGainTxt();
+        }
 
         config.release(created);
 
@@ -311,13 +313,18 @@ private:
         rtlsdr_set_direct_sampling(_this->openDev, _this->directSamplingMode);
         rtlsdr_set_bias_tee(_this->openDev, _this->biasT);
         rtlsdr_set_agc_mode(_this->openDev, _this->rtlAgc);
-        rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+        if (!_this->gainList.empty()) {
+            if (_this->gainId >= (int)_this->gainList.size()) { _this->gainId = _this->gainList.size() - 1; }
+            rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+        }
         if (_this->tunerAgc) {
             rtlsdr_set_tuner_gain_mode(_this->openDev, 0);
         }
         else {
             rtlsdr_set_tuner_gain_mode(_this->openDev, 1);
-            rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+            if (!_this->gainList.empty()) {
+                rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+            }
         }
         rtlsdr_set_offset_tuning(_this->openDev, _this->offsetTuning);
 

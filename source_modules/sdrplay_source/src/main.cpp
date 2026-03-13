@@ -150,7 +150,22 @@ public:
 
         sdrplay_api_DeviceT devArr[MAX_DEV_COUNT];
         unsigned int numDev = 0;
-        sdrplay_api_GetDevices(devArr, &numDev, MAX_DEV_COUNT);
+
+        // Lock the device API before enumerating devices (required by API spec)
+        sdrplay_api_ErrT err = sdrplay_api_LockDeviceApi();
+        if (err != sdrplay_api_Success) {
+            flog::error("Could not lock SDRplay device API: {0}", sdrplay_api_GetErrorString(err));
+            return;
+        }
+
+        err = sdrplay_api_GetDevices(devArr, &numDev, MAX_DEV_COUNT);
+        if (err != sdrplay_api_Success) {
+            flog::error("Could not get SDRplay devices: {0}", sdrplay_api_GetErrorString(err));
+            sdrplay_api_UnlockDeviceApi();
+            return;
+        }
+
+        sdrplay_api_UnlockDeviceApi();
 
         for (unsigned int i = 0; i < numDev; i++) {
             devList.push_back(devArr[i]);
@@ -504,7 +519,6 @@ private:
         if (err != sdrplay_api_Success) {
             const char* errStr = sdrplay_api_GetErrorString(err);
             flog::error("Could not select RSP device: {0}", errStr);
-            _this->selectedName = "";
             return;
         }
 
@@ -515,21 +529,13 @@ private:
         if (err != sdrplay_api_Success) {
             const char* errStr = sdrplay_api_GetErrorString(err);
             flog::error("Could not get device params for RSP device: {0}", errStr);
-            _this->selectedName = "";
-            return;
-        }
-
-        err = sdrplay_api_Init(_this->openDev.dev, &_this->cbFuncs, _this);
-        if (err != sdrplay_api_Success) {
-            const char* errStr = sdrplay_api_GetErrorString(err);
-            flog::error("Could not init RSP device: {0}", errStr);
-            _this->selectedName = "";
+            sdrplay_api_ReleaseDevice(&_this->openDev);
             return;
         }
 
         _this->channelParams = _this->openDevParams->rxChannelA;
 
-        // Configure device
+        // Configure device parameters BEFORE sdrplay_api_Init
         _this->bufferIndex = 0;
         _this->bufferSize = (float)_this->sampleRate / 200.0f;
 
@@ -538,44 +544,27 @@ private:
             _this->openDevParams->devParams->rsp1aParams.rfNotchEnable = _this->rsp1a_fmmwNotch;
             _this->openDevParams->devParams->rsp1aParams.rfDabNotchEnable = _this->rsp1a_dabNotch;
             _this->channelParams->rsp1aTunerParams.biasTEnable = _this->rsp1a_biasT;
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp1a_RfNotchControl, sdrplay_api_Update_Ext1_None);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp1a_RfDabNotchControl, sdrplay_api_Update_Ext1_None);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp1a_BiasTControl, sdrplay_api_Update_Ext1_None);
         }
         else if (_this->openDev.hwVer == SDRPLAY_RSP2_ID) {
             _this->channelParams->rsp2TunerParams.rfNotchEnable = _this->rsp2_fmmwNotch;
             _this->channelParams->rsp2TunerParams.biasTEnable = _this->rsp2_biasT;
             _this->channelParams->rsp2TunerParams.antennaSel = rsp2_antennaPorts[_this->rsp2_antennaPort];
             _this->channelParams->rsp2TunerParams.amPortSel = (_this->rsp2_antennaPort == 2) ? sdrplay_api_Rsp2_AMPORT_1 : sdrplay_api_Rsp2_AMPORT_2;
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp2_RfNotchControl, sdrplay_api_Update_Ext1_None);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp2_BiasTControl, sdrplay_api_Update_Ext1_None);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp2_AntennaControl, sdrplay_api_Update_Ext1_None);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp2_AmPortSelect, sdrplay_api_Update_Ext1_None);
         }
         else if (_this->openDev.hwVer == SDRPLAY_RSPduo_ID) {
-            // NOTE: mmight require setting it on both RXA and RXB
-            _this->rspDuoSelectAntennaPort(_this->rspduo_antennaPort);
             _this->channelParams->rspDuoTunerParams.biasTEnable = _this->rspduo_biasT;
             _this->channelParams->rspDuoTunerParams.rfNotchEnable = _this->rspduo_fmmwNotch;
             _this->channelParams->rspDuoTunerParams.rfDabNotchEnable = _this->rspduo_dabNotch;
             _this->channelParams->rspDuoTunerParams.tuner1AmNotchEnable = _this->rspduo_fmmwNotch;
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_RspDuo_BiasTControl, sdrplay_api_Update_Ext1_None);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_RspDuo_RfNotchControl, sdrplay_api_Update_Ext1_None);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_RspDuo_RfDabNotchControl, sdrplay_api_Update_Ext1_None);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_RspDuo_Tuner1AmNotchControl, sdrplay_api_Update_Ext1_None);
         }
         else if (_this->openDev.hwVer == SDRPLAY_RSPdx_ID || _this->openDev.hwVer == SDRPLAY_RSPdxR2_ID) {
             _this->openDevParams->devParams->rspDxParams.rfNotchEnable = _this->rspdx_fmmwNotch;
             _this->openDevParams->devParams->rspDxParams.rfDabNotchEnable = _this->rspdx_dabNotch;
             _this->openDevParams->devParams->rspDxParams.biasTEnable = _this->rspdx_biasT;
             _this->openDevParams->devParams->rspDxParams.antennaSel = rspdx_antennaPorts[_this->rspdx_antennaPort];
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_RfNotchControl);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_RfDabNotchControl);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_BiasTControl);
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_AntennaControl);
         }
 
-        // General options
+        // General options - set before Init so device starts with correct params
         if (_this->ifModeId == 0) {
             _this->bandwidth = (_this->bandwidthId == 8) ? preferedBandwidth[_this->srId] : _this->bandwidths[_this->bandwidthId];
             _this->openDevParams->devParams->fsFreq.fsHz = _this->sampleRate;
@@ -594,23 +583,48 @@ private:
         _this->channelParams->tunerParams.ifType = ifModes[_this->ifModeId].ifValue;
         _this->channelParams->tunerParams.loMode = sdrplay_api_LO_Auto;
 
-        // Hard coded AGC parameters
+        // AGC parameters
         _this->channelParams->ctrlParams.agc.attack_ms = _this->agcAttack;
         _this->channelParams->ctrlParams.agc.decay_ms = _this->agcDecay;
         _this->channelParams->ctrlParams.agc.decay_delay_ms = _this->agcDecayDelay;
         _this->channelParams->ctrlParams.agc.decay_threshold_dB = _this->agcDecayThreshold;
         _this->channelParams->ctrlParams.agc.setPoint_dBfs = _this->agcSetPoint;
-        _this->channelParams->ctrlParams.agc.enable = _this->agc ? sdrplay_api_AGC_CTRL_EN : sdrplay_api_AGC_DISABLE;
+        _this->channelParams->ctrlParams.agc.enable = _this->agc ? sdrplay_api_AGC_50HZ : sdrplay_api_AGC_DISABLE;
 
-        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Dev_Fs, sdrplay_api_Update_Ext1_None);
-        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Tuner_BwType, sdrplay_api_Update_Ext1_None);
-        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Tuner_IfType, sdrplay_api_Update_Ext1_None);
-        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Tuner_LoMode, sdrplay_api_Update_Ext1_None);
-        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Ctrl_Decimation, sdrplay_api_Update_Ext1_None);
-        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Ctrl_DCoffsetIQimbalance, sdrplay_api_Update_Ext1_None);
-        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Tuner_Frf, sdrplay_api_Update_Ext1_None);
-        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Tuner_Gr, sdrplay_api_Update_Ext1_None);
-        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Ctrl_Agc, sdrplay_api_Update_Ext1_None);
+        // Now init the device - it will use all the parameters set above
+        err = sdrplay_api_Init(_this->openDev.dev, &_this->cbFuncs, _this);
+        if (err != sdrplay_api_Success) {
+            const char* errStr = sdrplay_api_GetErrorString(err);
+            flog::error("Could not init RSP device: {0}", errStr);
+            sdrplay_api_ReleaseDevice(&_this->openDev);
+            return;
+        }
+
+        // Apply device-specific options that require Update after Init
+        if (_this->openDev.hwVer == SDRPLAY_RSP1A_ID || _this->openDev.hwVer == SDRPLAY_RSP1B_ID) {
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp1a_RfNotchControl, sdrplay_api_Update_Ext1_None);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp1a_RfDabNotchControl, sdrplay_api_Update_Ext1_None);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp1a_BiasTControl, sdrplay_api_Update_Ext1_None);
+        }
+        else if (_this->openDev.hwVer == SDRPLAY_RSP2_ID) {
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp2_RfNotchControl, sdrplay_api_Update_Ext1_None);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp2_BiasTControl, sdrplay_api_Update_Ext1_None);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp2_AntennaControl, sdrplay_api_Update_Ext1_None);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Rsp2_AmPortSelect, sdrplay_api_Update_Ext1_None);
+        }
+        else if (_this->openDev.hwVer == SDRPLAY_RSPduo_ID) {
+            _this->rspDuoSelectAntennaPort(_this->rspduo_antennaPort);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_RspDuo_BiasTControl, sdrplay_api_Update_Ext1_None);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_RspDuo_RfNotchControl, sdrplay_api_Update_Ext1_None);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_RspDuo_RfDabNotchControl, sdrplay_api_Update_Ext1_None);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_RspDuo_Tuner1AmNotchControl, sdrplay_api_Update_Ext1_None);
+        }
+        else if (_this->openDev.hwVer == SDRPLAY_RSPdx_ID || _this->openDev.hwVer == SDRPLAY_RSPdxR2_ID) {
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_RfNotchControl);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_RfDabNotchControl);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_BiasTControl);
+            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_AntennaControl);
+        }
 
         _this->running = true;
         flog::info("SDRPlaySourceModule '{0}': Start!", _this->name);
@@ -634,7 +648,10 @@ private:
         SDRPlaySourceModule* _this = (SDRPlaySourceModule*)ctx;
         if (_this->running) {
             _this->channelParams->tunerParams.rfFreq.rfHz = freq;
-            sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Tuner_Frf, sdrplay_api_Update_Ext1_None);
+            sdrplay_api_ErrT err = sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Tuner_Frf, sdrplay_api_Update_Ext1_None);
+            if (err != sdrplay_api_Success) {
+                flog::error("SDRPlaySourceModule '{0}': Tune update failed: {1}", _this->name, sdrplay_api_GetErrorString(err));
+            }
         }
         _this->freq = freq;
         flog::info("SDRPlaySourceModule '{0}': Tune: {1}!", _this->name, freq);
@@ -799,7 +816,7 @@ private:
             SmGui::ForceSync();
             if (SmGui::Checkbox(CONCAT("IF AGC##sdrplay_agc", _this->name), &_this->agc)) {
                 if (_this->running) {
-                    _this->channelParams->ctrlParams.agc.enable = _this->agc ? sdrplay_api_AGC_CTRL_EN : sdrplay_api_AGC_DISABLE;
+                    _this->channelParams->ctrlParams.agc.enable = _this->agc ? sdrplay_api_AGC_50HZ : sdrplay_api_AGC_DISABLE;
                     if (_this->agc) {
                         _this->channelParams->ctrlParams.agc.attack_ms = _this->agcAttack;
                         _this->channelParams->ctrlParams.agc.decay_ms = _this->agcDecay;
@@ -1094,8 +1111,15 @@ private:
     static void streamCB(short* xi, short* xq, sdrplay_api_StreamCbParamsT* params,
                          unsigned int numSamples, unsigned int reset, void* cbContext) {
         SDRPlaySourceModule* _this = (SDRPlaySourceModule*)cbContext;
-        // TODO: Optimise using volk and math
         if (!_this->running) { return; }
+
+        // Handle stream reset (triggered by frequency change, gain change, etc.)
+        if (reset) {
+            flog::info("SDRPlaySourceModule '{0}': Stream reset requested", _this->name);
+            _this->bufferIndex = 0;
+            return;
+        }
+
         for (int i = 0; i < numSamples; i++) {
             int id = _this->bufferIndex++;
             _this->stream.writeBuf[id].re = (float)xi[i] / 32768.0f;
@@ -1111,6 +1135,31 @@ private:
     static void eventCB(sdrplay_api_EventT eventId, sdrplay_api_TunerSelectT tuner,
                         sdrplay_api_EventParamsT* params, void* cbContext) {
         SDRPlaySourceModule* _this = (SDRPlaySourceModule*)cbContext;
+
+        switch (eventId) {
+        case sdrplay_api_PowerOverloadChange:
+            // Must acknowledge power overload events per API spec
+            sdrplay_api_Update(_this->openDev.dev, tuner, sdrplay_api_Update_Ctrl_OverloadMsgAck, sdrplay_api_Update_Ext1_None);
+            if (params->powerOverloadParams.powerOverloadChangeType == sdrplay_api_Overload_Detected) {
+                flog::warn("SDRPlaySourceModule '{0}': ADC power overload detected", _this->name);
+            }
+            else {
+                flog::info("SDRPlaySourceModule '{0}': ADC power overload corrected", _this->name);
+            }
+            break;
+        case sdrplay_api_GainChange:
+            flog::debug("SDRPlaySourceModule '{0}': Gain change - gRdB={1}, lnaGRdB={2}", _this->name,
+                        params->gainParams.gRdB, params->gainParams.lnaGRdB);
+            break;
+        case sdrplay_api_DeviceRemoved:
+            flog::error("SDRPlaySourceModule '{0}': Device removed!", _this->name);
+            break;
+        case sdrplay_api_RspDuoModeChange:
+            flog::info("SDRPlaySourceModule '{0}': RSPduo mode change", _this->name);
+            break;
+        default:
+            break;
+        }
     }
 
     std::string name;
