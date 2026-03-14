@@ -78,6 +78,10 @@ const char* ifModeTxt =
 
 const char* rspduo_antennaPortsTxt = "Tuner 1 (50Ohm)\0Tuner 1 (Hi-Z)\0Tuner 2 (50Ohm)\0";
 
+const char* usbTransferModeTxt = "Isochronous\0Bulk\0";
+const char* decimationFactorTxt = "1 (Off)\0x2\0x4\0x8\0x16\0x32\0";
+const unsigned char decimationFactors[] = { 1, 2, 4, 8, 16, 32 };
+
 #define MAX_DEV_COUNT   16
 
 class SDRPlaySourceModule : public ModuleManager::Instance {
@@ -94,6 +98,21 @@ public:
         if (err != sdrplay_api_Success) {
             flog::error("Could not intiatialized the SDRplay API. Make sure that the service is running.");
             return;
+        }
+
+        // Check API version compatibility
+        float apiVer = 0.0f;
+        err = sdrplay_api_ApiVersion(&apiVer);
+        if (err == sdrplay_api_Success) {
+            flog::info("SDRplay API version: {0}", apiVer);
+            if (apiVer < 3.0f) {
+                flog::error("SDRplay API version {0} is too old. Version 3.x or later is required.", apiVer);
+                sdrplay_api_Close();
+                return;
+            }
+        }
+        else {
+            flog::warn("Could not check SDRplay API version: {0}", sdrplay_api_GetErrorString(err));
         }
 
         sampleRate = 2000000.0;
@@ -227,7 +246,7 @@ public:
     }
 
     void selectByName(std::string name) {
-        for (int i = 0; i < devNameList.size(); i++) {
+        for (size_t i = 0; i < devNameList.size(); i++) {
             if (devNameList[i] == name) {
                 selectDev(devList[i], i);
                 return;
@@ -261,6 +280,7 @@ public:
         if (err != sdrplay_api_Success) {
             const char* errStr = sdrplay_api_GetErrorString(err);
             flog::error("Could not get device params for RSP device: {0}", errStr);
+            sdrplay_api_ReleaseDevice(&openDev);
             selectedName = "";
             return;
         }
@@ -269,6 +289,7 @@ public:
         if (err != sdrplay_api_Success) {
             const char* errStr = sdrplay_api_GetErrorString(err);
             flog::error("Could not init RSP device: {0}", errStr);
+            sdrplay_api_ReleaseDevice(&openDev);
             selectedName = "";
             return;
         }
@@ -330,6 +351,15 @@ public:
         agcDecayThreshold = 5;
         agcSetPoint = -30;
         ifModeId = 0;
+        ppm = 0.0f;
+        extendedGainRange = false;
+        usbTransferMode = 0;
+        decimationFactorId = 0;
+        decimationWideband = false;
+        dcCalMode = 3;
+        dcCalSpeedUp = 0;
+        dcCalTrackTime = 1;
+        dcCalRefreshRate = 2048;
         rsp1a_fmmwNotch = false;
         rsp2_fmmwNotch = false;
         rspdx_fmmwNotch = false;
@@ -387,6 +417,30 @@ public:
         }
         if (config.conf["devices"][selectedName].contains("agcSetPoint")) {
             agcSetPoint = config.conf["devices"][selectedName]["agcSetPoint"];
+        }
+        if (config.conf["devices"][selectedName].contains("ppm")) {
+            ppm = config.conf["devices"][selectedName]["ppm"];
+        }
+        if (config.conf["devices"][selectedName].contains("extendedGainRange")) {
+            extendedGainRange = config.conf["devices"][selectedName]["extendedGainRange"];
+        }
+        if (config.conf["devices"][selectedName].contains("usbTransferMode")) {
+            usbTransferMode = config.conf["devices"][selectedName]["usbTransferMode"];
+        }
+        if (config.conf["devices"][selectedName].contains("decimationFactor")) {
+            decimationFactorId = config.conf["devices"][selectedName]["decimationFactor"];
+        }
+        if (config.conf["devices"][selectedName].contains("decimationWideband")) {
+            decimationWideband = config.conf["devices"][selectedName]["decimationWideband"];
+        }
+        if (config.conf["devices"][selectedName].contains("dcCalMode")) {
+            dcCalMode = config.conf["devices"][selectedName]["dcCalMode"];
+        }
+        if (config.conf["devices"][selectedName].contains("dcCalTrackTime")) {
+            dcCalTrackTime = config.conf["devices"][selectedName]["dcCalTrackTime"];
+        }
+        if (config.conf["devices"][selectedName].contains("dcCalRefreshRate")) {
+            dcCalRefreshRate = config.conf["devices"][selectedName]["dcCalRefreshRate"];
         }
 
         // Per device options
@@ -457,8 +511,8 @@ public:
         if (openDev.tuner != tuner) {
             flog::info("Swapping tuners");
             auto ret = sdrplay_api_SwapRspDuoActiveTuner(openDev.dev, &openDev.tuner, amPort);
-            if (ret != 0) {
-                flog::error("Error while swapping tuners: {0}", (int)ret);
+            if (ret != sdrplay_api_Success) {
+                flog::error("Error while swapping tuners: {0}", sdrplay_api_GetErrorString(ret));
             }
         }
 
@@ -481,20 +535,6 @@ public:
     }
 
 private:
-    std::string getBandwdithScaled(double bw) {
-        char buf[1024];
-        if (bw >= 1000000.0) {
-            sprintf(buf, "%.1lfMHz", bw / 1000000.0);
-        }
-        else if (bw >= 1000.0) {
-            sprintf(buf, "%.1lfKHz", bw / 1000.0);
-        }
-        else {
-            sprintf(buf, "%.1lfHz", bw);
-        }
-        return std::string(buf);
-    }
-
     static void menuSelected(void* ctx) {
         SDRPlaySourceModule* _this = (SDRPlaySourceModule*)ctx;
         core::setInputSampleRate(_this->sampleRate);
@@ -537,7 +577,7 @@ private:
 
         // Configure device parameters BEFORE sdrplay_api_Init
         _this->bufferIndex = 0;
-        _this->bufferSize = (float)_this->sampleRate / 200.0f;
+        _this->bufferSize = (int)(_this->sampleRate / 200.0);
 
         // RSP1A Options
         if (_this->openDev.hwVer == SDRPLAY_RSP1A_ID || _this->openDev.hwVer == SDRPLAY_RSP1B_ID) {
@@ -577,11 +617,39 @@ private:
         _this->channelParams->tunerParams.rfFreq.rfHz = _this->freq;
         _this->channelParams->tunerParams.gain.gRdB = _this->gain;
         _this->channelParams->tunerParams.gain.LNAstate = _this->lnaGain;
-        _this->channelParams->ctrlParams.decimation.enable = false;
-        _this->channelParams->ctrlParams.dcOffset.DCenable = true;
-        _this->channelParams->ctrlParams.dcOffset.IQenable = true;
         _this->channelParams->tunerParams.ifType = ifModes[_this->ifModeId].ifValue;
         _this->channelParams->tunerParams.loMode = sdrplay_api_LO_Auto;
+
+        // Extended gain range
+        _this->channelParams->tunerParams.gain.minGr = _this->extendedGainRange ? sdrplay_api_EXTENDED_MIN_GR : sdrplay_api_NORMAL_MIN_GR;
+
+        // PPM correction
+        _this->openDevParams->devParams->ppm = _this->ppm;
+
+        // USB transfer mode
+        _this->openDevParams->devParams->mode = _this->usbTransferMode == 0 ? sdrplay_api_ISOCH : sdrplay_api_BULK;
+
+        // DC offset and IQ correction
+        _this->channelParams->ctrlParams.dcOffset.DCenable = true;
+        _this->channelParams->ctrlParams.dcOffset.IQenable = true;
+
+        // DC offset tuner calibration
+        _this->channelParams->tunerParams.dcOffsetTuner.dcCal = _this->dcCalMode;
+        _this->channelParams->tunerParams.dcOffsetTuner.speedUp = _this->dcCalSpeedUp;
+        _this->channelParams->tunerParams.dcOffsetTuner.trackTime = _this->dcCalTrackTime;
+        _this->channelParams->tunerParams.dcOffsetTuner.refreshRateTime = _this->dcCalRefreshRate;
+
+        // Decimation
+        if (_this->decimationFactorId > 0) {
+            _this->channelParams->ctrlParams.decimation.enable = true;
+            _this->channelParams->ctrlParams.decimation.decimationFactor = decimationFactors[_this->decimationFactorId];
+            _this->channelParams->ctrlParams.decimation.wideBandSignal = _this->decimationWideband ? 1 : 0;
+        }
+        else {
+            _this->channelParams->ctrlParams.decimation.enable = false;
+            _this->channelParams->ctrlParams.decimation.decimationFactor = 1;
+            _this->channelParams->ctrlParams.decimation.wideBandSignal = 0;
+        }
 
         // AGC parameters
         _this->channelParams->ctrlParams.agc.attack_ms = _this->agcAttack;
@@ -772,7 +840,8 @@ private:
             if (_this->agc > 0) { SmGui::BeginDisabled(); }
             SmGui::LeftLabel("IF Gain");
             SmGui::FillWidth();
-            if (SmGui::SliderInt(CONCAT("##sdrplay_gain", _this->name), &_this->gain, 59, 20, SmGui::FMT_STR_NONE)) {
+            int minGain = _this->extendedGainRange ? 0 : 20;
+            if (SmGui::SliderInt(CONCAT("##sdrplay_gain", _this->name), &_this->gain, 59, minGain, SmGui::FMT_STR_NONE)) {
                 if (_this->running) {
                     _this->channelParams->tunerParams.gain.gRdB = _this->gain;
                     sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Tuner_Gr, sdrplay_api_Update_Ext1_None);
@@ -845,6 +914,62 @@ private:
                 _this->_agcDecayDelay = _this->agcDecayDelay;
                 _this->_agcDecayThreshold = _this->agcDecayThreshold;
                 _this->_agcSetPoint = _this->agcSetPoint;
+            }
+
+            // PPM Correction
+            SmGui::LeftLabel("PPM Correction");
+            SmGui::FillWidth();
+            if (SmGui::SliderFloatWithSteps(CONCAT("##sdrplay_ppm", _this->name), &_this->ppm, -100.0f, 100.0f, 0.1f)) {
+                if (_this->running) {
+                    _this->openDevParams->devParams->ppm = _this->ppm;
+                    sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Dev_Ppm, sdrplay_api_Update_Ext1_None);
+                }
+                config.acquire();
+                config.conf["devices"][_this->selectedName]["ppm"] = _this->ppm;
+                config.release(true);
+            }
+
+            // Extended Gain Range
+            if (SmGui::Checkbox(CONCAT("Extended Gain Range##sdrplay_extgr", _this->name), &_this->extendedGainRange)) {
+                if (_this->running) {
+                    _this->channelParams->tunerParams.gain.minGr = _this->extendedGainRange ? sdrplay_api_EXTENDED_MIN_GR : sdrplay_api_NORMAL_MIN_GR;
+                    sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Tuner_Gr, sdrplay_api_Update_Ext1_None);
+                }
+                config.acquire();
+                config.conf["devices"][_this->selectedName]["extendedGainRange"] = _this->extendedGainRange;
+                config.release(true);
+            }
+
+            // USB Transfer Mode
+            if (_this->running) { SmGui::BeginDisabled(); }
+            SmGui::LeftLabel("USB Mode");
+            SmGui::FillWidth();
+            if (SmGui::Combo(CONCAT("##sdrplay_usb_mode", _this->name), &_this->usbTransferMode, usbTransferModeTxt)) {
+                config.acquire();
+                config.conf["devices"][_this->selectedName]["usbTransferMode"] = _this->usbTransferMode;
+                config.release(true);
+            }
+
+            // Decimation
+            SmGui::LeftLabel("Decimation");
+            SmGui::FillWidth();
+            if (SmGui::Combo(CONCAT("##sdrplay_decim", _this->name), &_this->decimationFactorId, decimationFactorTxt)) {
+                config.acquire();
+                config.conf["devices"][_this->selectedName]["decimationFactor"] = _this->decimationFactorId;
+                config.release(true);
+            }
+            if (_this->running) { SmGui::EndDisabled(); }
+
+            if (_this->decimationFactorId > 0) {
+                if (SmGui::Checkbox(CONCAT("Wideband Decimation##sdrplay_decim_wb", _this->name), &_this->decimationWideband)) {
+                    if (_this->running) {
+                        _this->channelParams->ctrlParams.decimation.wideBandSignal = _this->decimationWideband ? 1 : 0;
+                        sdrplay_api_Update(_this->openDev.dev, _this->openDev.tuner, sdrplay_api_Update_Ctrl_Decimation, sdrplay_api_Update_Ext1_None);
+                    }
+                    config.acquire();
+                    config.conf["devices"][_this->selectedName]["decimationWideband"] = _this->decimationWideband;
+                    config.release(true);
+                }
             }
 
             switch (_this->openDev.hwVer) {
@@ -1117,10 +1242,20 @@ private:
         if (reset) {
             flog::info("SDRPlaySourceModule '{0}': Stream reset requested", _this->name);
             _this->bufferIndex = 0;
-            return;
         }
 
-        for (int i = 0; i < numSamples; i++) {
+        // Log parameter changes signaled by the API
+        if (params->grChanged) {
+            flog::debug("SDRPlaySourceModule '{0}': Gain reduction changed (sample {1})", _this->name, params->firstSampleNum);
+        }
+        if (params->rfChanged) {
+            flog::debug("SDRPlaySourceModule '{0}': RF frequency changed (sample {1})", _this->name, params->firstSampleNum);
+        }
+        if (params->fsChanged) {
+            flog::debug("SDRPlaySourceModule '{0}': Sample rate changed (sample {1})", _this->name, params->firstSampleNum);
+        }
+
+        for (unsigned int i = 0; i < numSamples; i++) {
             int id = _this->bufferIndex++;
             _this->stream.writeBuf[id].re = (float)xi[i] / 32768.0f;
             _this->stream.writeBuf[id].im = (float)xq[i] / 32768.0f;
@@ -1156,6 +1291,9 @@ private:
             break;
         case sdrplay_api_RspDuoModeChange:
             flog::info("SDRPlaySourceModule '{0}': RSPduo mode change", _this->name);
+            break;
+        case sdrplay_api_DeviceFailure:
+            flog::error("SDRPlaySourceModule '{0}': Device failure!", _this->name);
             break;
         default:
             break;
@@ -1206,6 +1344,17 @@ private:
     int bufferIndex = 0;
 
     int ifModeId = 0;
+
+    // General advanced options
+    float ppm = 0.0f;
+    bool extendedGainRange = false;
+    int usbTransferMode = 0;
+    int decimationFactorId = 0;
+    bool decimationWideband = false;
+    int dcCalMode = 3;
+    int dcCalSpeedUp = 0;
+    int dcCalTrackTime = 1;
+    int dcCalRefreshRate = 2048;
 
     // RSP1A Options
     bool rsp1a_fmmwNotch = false;
